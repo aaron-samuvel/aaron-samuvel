@@ -15,7 +15,7 @@ I build maintainable Java web applications with clear MVC boundaries, secure dep
 
 ## Current project
 
-**Spring Boot Inventory Console** — an in-progress Java showcase using Spring MVC, JSP/JSTL, PostgreSQL, and Apache Tomcat. It includes environment-based configuration, security, migrations, health probes, metrics, bounded pools, and container deployment guidance. Build and deployment validation are still pending, so I am not presenting it as production-certified.
+[Spring Boot Inventory Console](https://github.com/aaron-samuvel/springboot-inventory-console) — an in-progress Java showcase using Spring MVC, JSP/JSTL, PostgreSQL, and Apache Tomcat. It includes environment-based configuration, security, migrations, health probes, metrics, bounded pools, and container deployment guidance. Build and deployment validation are still pending, so I am not presenting it as production-certified.
 
 ## Engineering approach
 

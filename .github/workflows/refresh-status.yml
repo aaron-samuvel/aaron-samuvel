@@ -85,7 +85,7 @@ jobs:
               "",
               END,
           ])
-          new = re.sub(re.escape(START) + r".*?" + re.escape(END), block.replace("\", "\\"), readme, flags=re.S)
+          new = re.sub(re.escape(START) + r".*?" + re.escape(END), lambda _m: block, readme, flags=re.S)
           if new == readme:
               print("stats unchanged — README untouched")
           open("README.md", "w", encoding="utf-8").write(new)

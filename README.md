@@ -77,6 +77,19 @@ A fast, business-focused catalog website for an industrial machine spare parts c
 - GitHub achievements earned: **Pull Shark**, **YOLO**, **Quickdraw**.
 - Maintaining the contributor and community-health setup in [udhaar-khata](https://github.com/aaron-samuvel/udhaar-khata): code of conduct, security policy, issue/PR templates, CI, and release automation.
 
+<!-- live-status:start -->
+**Live status** (auto-refreshed daily by GitHub Actions — verified 2026-11-24 18:11 UTC):
+
+| Check | Value |
+|---|---|
+| Udhaar Khata demo site | [![UP](https://img.shields.io/badge/live%20site-UP-brightgreen)](https://aaron-samuvel.github.io/udhaar-khata/) |
+| Merged pull requests (udhaar-khata) | 67 |
+| Merged pull requests (all repos — Pull Shark counter) | 69 |
+| Commits on udhaar-khata `main` | 153 |
+| Last Pages deploy | 2026-11-24 17:47:10 UTC |
+
+<!-- live-status:end -->
+
 ## Project log (this profile is a living log — new work extends it)
 
 - **Shipped:** Udhaar Khata static Pages deployment with PWA offline support, backup/restore, and a trilingual docs library (English / Hindi / Tamil); CI, Dependabot, Release Drafter, and OpenSSF Scorecard wired up.

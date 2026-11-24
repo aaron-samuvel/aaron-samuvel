@@ -1,0 +1,104 @@
+name: Refresh live status
+
+# Keeps the profile README's "Live status" section truthful. Fetches the
+# same numbers the section documents (merged PR counts, commit count, last
+# Pages deploy, live-site check) and rewrites the block between the
+# live-status markers. Commits only when something actually changed, so
+# the README never drifts from reality and never lies.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # daily 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-live-status
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch live stats and rewrite the marked README block
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os, re, urllib.request, urllib.error
+
+          API = "https://api.github.com"
+          KHATA = "aaron-samuvel/udhaar-khata"
+          LIVE = "https://aaron-samuvel.github.io/udhaar-khata/"
+          START = "<!-- live-status:start -->"
+          END = "<!-- live-status:end -->"
+          TOKEN = os.environ["GH_TOKEN"]
+          auth = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json", "User-Agent": "profile-refresh"}
+
+          def get(url):
+              req = urllib.request.Request(url)
+              for k, v in auth.items():
+                  req.add_header(k, v)
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return r.read(), dict(r.headers)
+
+          def get_int(url, key):
+              body, _ = get(url)
+              return json.loads(body)[key]
+
+          stats = {}
+          stats["khata_prs"] = get_int(f"{API}/search/issues?q=repo:{KHATA}+type:pr+is:merged&per_page=1", "total_count")
+          stats["total_prs"] = get_int(f"{API}/search/issues?q=author:aaron-samuvel+type:pr+is:merged&per_page=1", "total_count")
+          body, headers = get(f"{API}/repos/{KHATA}/commits?per_page=1")
+          link = headers.get("Link", "") or headers.get("link", "")
+          stats["khata_commits"] = int(link.split("page=")[-1].split(">")[0]) if 'rel="last"' in link else 1
+          body, _ = get(f"{API}/repos/{KHATA}/commits/gh-pages?per_page=1")
+          dep = json.loads(body)
+          stats["last_deploy"] = dep["commit"]["committer"]["date"].replace("T", " ").replace("Z", " UTC")
+          try:
+              get(LIVE)
+              stats["site"] = "UP"
+          except urllib.error.HTTPError as e:
+              stats["site"] = f"DOWN ({e.code})"
+          stats["now"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+          readme = open("README.md", encoding="utf-8").read()
+          if START not in readme or END not in readme:
+              raise SystemExit("live-status markers missing from README.md — nothing updated")
+
+          badge = "https://img.shields.io/badge/" + ("live%20site-UP-brightgreen" if stats["site"] == "UP" else f"live%20site-{stats['site']}-red")
+          block = "\n".join([
+              START,
+              f"**Live status** (auto-refreshed daily by GitHub Actions — verified {stats['now']}):",
+              "",
+              "| Check | Value |",
+              "|---|---|",
+              f"| Udhaar Khata demo site | [![{stats['site']}]({badge})]({LIVE}) |",
+              f"| Merged pull requests (udhaar-khata) | {stats['khata_prs']} |",
+              f"| Merged pull requests (all repos — Pull Shark counter) | {stats['total_prs']} |",
+              f"| Commits on udhaar-khata `main` | {stats['khata_commits']} |",
+              f"| Last Pages deploy | {stats['last_deploy']} |",
+              "",
+              END,
+          ])
+          new = re.sub(re.escape(START) + r".*?" + re.escape(END), block.replace("\", "\\"), readme, flags=re.S)
+          if new == readme:
+              print("stats unchanged — README untouched")
+          open("README.md", "w", encoding="utf-8").write(new)
+          PY
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet README.md; then
+            echo "no changes to commit"
+            exit 0
+          fi
+          git config user.name "aaron-samuvel"
+          git config user.email "aaron-samuvel@users.noreply.github.com"
+          git add README.md
+          git commit -m "chore: refresh live status [skip ci]"
+          git push

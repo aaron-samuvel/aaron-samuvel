@@ -3,12 +3,20 @@ name: Refresh live status
 # Keeps the profile README's "Live status" section truthful. Fetches the
 # same numbers the section documents (merged PR counts, commit count, last
 # Pages deploy, live-site check) and rewrites the block between the
-# live-status markers. Commits only when something actually changed, so
-# the README never drifts from reality and never lies.
+# live-status markers. Triggers: every push (re-stamps after content
+# edits), three staggered schedules (redundancy against GitHub's
+# occasional schedule skips), and on demand via workflow_dispatch.
+# Individual stat fetches fall back to the previous README value, so one
+# flaky API call can never abort the refresh or blank the table.
+# Commits only when something actually changed.
 
 on:
+  push:
+    branches: [main]
   schedule:
-    - cron: "17 6 * * *"   # daily 06:17 UTC
+    - cron: "55 */6 * * *"  # every 6 hours at :55
+    - cron: "45 15 * * *"   # daily 15:45 UTC
+    - cron: "25 9 * * *"    # daily 09:25 UTC
   workflow_dispatch:
 
 permissions:
@@ -46,42 +54,70 @@ jobs:
               with urllib.request.urlopen(req, timeout=30) as r:
                   return r.read(), dict(r.headers)
 
-          def get_int(url, key):
-              body, _ = get(url)
-              return json.loads(body)[key]
-
-          stats = {}
-          stats["khata_prs"] = get_int(f"{API}/search/issues?q=repo:{KHATA}+type:pr+is:merged&per_page=1", "total_count")
-          stats["total_prs"] = get_int(f"{API}/search/issues?q=author:aaron-samuvel+type:pr+is:merged&per_page=1", "total_count")
-          body, headers = get(f"{API}/repos/{KHATA}/commits?per_page=1")
-          link = headers.get("Link", "") or headers.get("link", "")
-          stats["khata_commits"] = int(link.split("page=")[-1].split(">")[0]) if 'rel="last"' in link else 1
-          body, _ = get(f"{API}/repos/{KHATA}/commits/gh-pages?per_page=1")
-          dep = json.loads(body)
-          stats["last_deploy"] = dep["commit"]["committer"]["date"].replace("T", " ").replace("Z", " UTC")
-          try:
-              get(LIVE)
-              stats["site"] = "UP"
-          except urllib.error.HTTPError as e:
-              stats["site"] = f"DOWN ({e.code})"
-          stats["now"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
           readme = open("README.md", encoding="utf-8").read()
           if START not in readme or END not in readme:
               raise SystemExit("live-status markers missing from README.md — nothing updated")
 
-          badge = "https://img.shields.io/badge/" + ("live%20site-UP-brightgreen" if stats["site"] == "UP" else f"live%20site-{stats['site']}-red")
+          def fetch_or_keep(label, fn):
+              """Fetch a stat; on any failure keep the previous README value."""
+              try:
+                  v = fn()
+                  if v is not None:
+                      return str(v)
+              except Exception as exc:
+                  print("fetch failed for", label, "->", exc)
+              m = re.search(r"\|\s*" + re.escape(label) + r"\s*\|\s*(.+?)\s*\|", readme)
+              return m.group(1) if m else "unknown"
+
+          def khata_prs():
+              body, _ = get(f"{API}/search/issues?q=repo:{KHATA}+type:pr+is:merged&per_page=1")
+              return json.loads(body)["total_count"]
+
+          def total_prs():
+              body, _ = get(f"{API}/search/issues?q=author:aaron-samuvel+type:pr+is:merged&per_page=1")
+              return json.loads(body)["total_count"]
+
+          def commit_count():
+              body, headers = get(f"{API}/repos/{KHATA}/commits?per_page=1")
+              link = headers.get("Link", "") or headers.get("link", "")
+              if 'rel="last"' not in link:
+                  return None
+              return int(link.split("page=")[-1].split(">")[0])
+
+          def last_deploy():
+              body, _ = get(f"{API}/repos/{KHATA}/commits/gh-pages?per_page=1")
+              return json.loads(body)["commit"]["committer"]["date"].replace("T", " ").replace("Z", " UTC")
+
+          def site_status():
+              try:
+                  get(LIVE)
+                  return "UP"
+              except urllib.error.HTTPError as exc:
+                  return f"DOWN ({exc.code})"
+
+          khata_v = fetch_or_keep("Merged pull requests (udhaar-khata)", khata_prs)
+          total_v = fetch_or_keep("Merged pull requests (all repos — Pull Shark counter)", total_prs)
+          commits_v = fetch_or_keep("Commits on udhaar-khata `main`", commit_count)
+          deploy_v = fetch_or_keep("Last Pages deploy", last_deploy)
+          site_v = fetch_or_keep("Udhaar Khata demo site", site_status)
+          if site_v.startswith("[!"):
+              site_cell = site_v  # fell back to the previous full markdown cell
+          else:
+              badge = "https://img.shields.io/badge/" + ("live%20site-UP-brightgreen" if site_v == "UP" else "live%20site-" + site_v.replace(" ", "%20") + "-red")
+              site_cell = f"[![{site_v}]({badge})]({LIVE})"
+
+          now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
           block = "\n".join([
               START,
-              f"**Live status** (auto-refreshed daily by GitHub Actions — verified {stats['now']}):",
+              f"**Live status** (auto-refreshed every few hours by GitHub Actions — verified {now}):",
               "",
               "| Check | Value |",
               "|---|---|",
-              f"| Udhaar Khata demo site | [![{stats['site']}]({badge})]({LIVE}) |",
-              f"| Merged pull requests (udhaar-khata) | {stats['khata_prs']} |",
-              f"| Merged pull requests (all repos — Pull Shark counter) | {stats['total_prs']} |",
-              f"| Commits on udhaar-khata `main` | {stats['khata_commits']} |",
-              f"| Last Pages deploy | {stats['last_deploy']} |",
+              f"| Udhaar Khata demo site | {site_cell} |",
+              f"| Merged pull requests (udhaar-khata) | {khata_v} |",
+              f"| Merged pull requests (all repos — Pull Shark counter) | {total_v} |",
+              f"| Commits on udhaar-khata `main` | {commits_v} |",
+              f"| Last Pages deploy | {deploy_v} |",
               "",
               END,
           ])
